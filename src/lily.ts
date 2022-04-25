@@ -155,14 +155,22 @@ const update = (node: Lily.Element | null, target: HTMLElement) => {
     }
 
     const { attr, children } = node
+    const attrKeys = Object.keys(target.attributes)
+    const leftover = attrKeys
+        ? new Set(attrKeys.map((key) => target.attributes[key as any].name))
+        : null
 
     if (attr)
         Object.entries(attr).forEach(([key, value]) => {
+            leftover!.delete(key)
+
             if (key === 'style')
                 return createStyle(value as Lily.Attr, target.style)
 
             if (isString(value)) return target.setAttribute(key, value)
         })
+
+    leftover?.forEach((key) => target.removeAttribute(key))
 
     if (children)
         children.forEach((child, index) => {
