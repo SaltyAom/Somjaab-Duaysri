@@ -5,9 +5,23 @@ namespace Lily {
         children: Lily.Children
     }
 
+    export interface Component<
+        State = Record<string, unknown>,
+        Props = Record<string, unknown>
+    > extends Node {
+        id: symbol
+        key: string | number | null
+        state: State | null
+        props: Props
+    }
+
+    export type FunctionComponent<Props = Record<string, unknown>> = (
+        props: Props
+    ) => Node
+
     export type Element = Node | string
     export type Attr = Record<string, unknown>
-    export type Children = Array<Lily.Element | null> | null
+    export type Children = Array<Lily.Component | Lily.Element | null> | null
 }
 
 const h = (
@@ -20,8 +34,12 @@ const h = (
     children
 })
 
-const diff = (o: Lily.Element, n: Lily.Element): Lily.Element | null => {
+const diff = (
+    o: Lily.Element | Lily.Component,
+    n: Lily.Element | Lily.Component
+): Lily.Element | null => {
     if (isString(o) || isString(n)) return o !== n ? n : null
+    if (isComponent(o) && isComponent(n) && o.id === n.id) return n
 
     if (o.name !== n.name) return n
     const attr = attrDiff(o.attr, n.attr)
@@ -39,7 +57,6 @@ const diff = (o: Lily.Element, n: Lily.Element): Lily.Element | null => {
 const diffChildren = (o: Lily.Children, n: Lily.Children): Lily.Children => {
     if (!o || !n) return n
 
-    let isEmpty = true
     const children: Array<Lily.Element | null> = []
 
     for (const [index, node] of n.entries()) {
@@ -47,37 +64,31 @@ const diffChildren = (o: Lily.Children, n: Lily.Children): Lily.Children => {
 
         if (!node || !ov) {
             children.push(node)
-            isEmpty = false
-
             continue
         }
 
         if (isString(node) || isString(ov)) {
             if (node === ov) children.push(null)
-            else {
-                isEmpty = false
-                children.push(node)
-            }
+            else children.push(node)
 
             continue
         }
 
-        if (ov) {
-            const diffed = diff(ov, node)
-
-            children.push(diffed)
-            if (diffed) isEmpty = false
-        } else children.push(node)
+        if (ov) children.push(diff(ov, node))
+        else children.push(node)
     }
 
-    return !isEmpty ? children : null
+    return !isEmpty(children) ? children : null
 }
 
 const isString = (v: unknown): v is string =>
     Object.prototype.toString.call(v) === '[object String]'
 
-const isObject = (v: unknown): v is Lily.Attr =>
+const isObject = <T = Lily.Attr>(v: unknown): v is T =>
     Object.prototype.toString.call(v) === '[object Object]' && !Array.isArray(v)
+
+const isComponent = (v: unknown): v is Lily.Component =>
+    isObject<Record<string, any>>(v) && v.symbol
 
 const isEmpty = (obj: Object) => {
     for (const _ in obj) return false
@@ -144,25 +155,31 @@ const construct = (node: Lily.Element) => {
 const update = (node: Lily.Element | null, target: HTMLElement) => {
     if (!node) return
 
-    if (
-        isString(node) ||
-        (node.name !== null && target.tagName !== node.name)
-    ) {
-        const newTarget = construct(node)
-        target.parentNode!.replaceChild(newTarget, target)
+    if (isString(node))
+        return void target.textContent !== node
+            ? (target.textContent = node)
+            : null
 
-        return
-    }
+    if (node.name && target.tagName !== node.name)
+        return void target.parentNode!.replaceChild(construct(node), target)
 
     const { attr, children } = node
+    const attrKeys = Object.keys(target.attributes)
+    const leftover = attrKeys
+        ? new Set(attrKeys.map((key) => target.attributes[key as any].name))
+        : null
 
     if (attr)
         Object.entries(attr).forEach(([key, value]) => {
+            leftover!.delete(key)
+
             if (key === 'style')
                 return createStyle(value as Lily.Attr, target.style)
 
             if (isString(value)) return target.setAttribute(key, value)
         })
+
+    leftover?.forEach((key) => target.removeAttribute(key))
 
     if (children)
         children.forEach((child, index) => {
@@ -184,6 +201,8 @@ const update = (node: Lily.Element | null, target: HTMLElement) => {
 
     while ((children?.length ?? 0) < target.childNodes.length)
         target.removeChild(target.lastChild!)
+
+    return
 }
 
 const render = (node: Lily.Element | null, target: HTMLElement) => {
@@ -192,6 +211,7 @@ const render = (node: Lily.Element | null, target: HTMLElement) => {
             update(node, target.childNodes[0] as HTMLElement)
         else if (node) target.appendChild(construct(node))
     } catch (err) {
+        // ? If failed somehow, blown all the node then create from scratch
         if (node)
             if (target.firstChild)
                 target.replaceChild(construct(node), target.firstChild)
@@ -199,4 +219,19 @@ const render = (node: Lily.Element | null, target: HTMLElement) => {
     }
 }
 
-export { h, construct, diff, update, render }
+const component = <
+    State = Record<string, unknown>,
+    Props = Record<string, unknown>
+>(
+    build: Lily.FunctionComponent<Props>,
+    state: State | null = null,
+    props: Props = {} as Props
+): Lily.Component<State, Props> => ({
+    ...build(props),
+    id: Symbol(),
+    state,
+    props,
+    key: ''
+})
+
+export { h, construct, diff, update, render, component }

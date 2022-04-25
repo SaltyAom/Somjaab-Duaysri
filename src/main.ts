@@ -1,4 +1,4 @@
-import { h, diff, render } from './lily'
+import { h, diff, render, component } from './lily'
 
 const a = h(
     'h1',
@@ -30,10 +30,26 @@ const b = h(
             {
                 class: 'hi'
             },
-            ['a', 'Hello!']
+            [
+                'a',
+                'Hello!',
+                h(
+                    'button',
+                    {
+                        onclick: () => console.log('clicked')
+                    },
+                    ['Hi']
+                )
+            ]
         )
     ]
 )
+
+const MyComponent = () => {
+    return h('h1', null, ['Hello World!'])
+}
+
+const fc = component(MyComponent)
 
 const root = document.getElementById('app')!
 
